@@ -1,0 +1,193 @@
+# confluent-platform.yaml
+# Confluent Platform deployment using CFK (Confluent for Kubernetes).
+#
+# Architecture:
+#   - KraftController (3 replicas) — Raft-based metadata quorum, NO ZooKeeper
+#   - Kafka (3 brokers)            — depends on KraftController, mTLS external listeners
+#
+# Apply with:
+#   kubectl apply -f confluent/confluent-platform.yaml
+#
+# Prerequisites:
+#   - CFK operator installed (k3d/setup-k3d.sh)
+#   - TLS secrets created (confluent/mtls/create-k8s-secrets.sh):
+#       kraftcontroller-tls, kafka-tls, kafka-client-tls
+# ---------------------------------------------------------------------------
+
+---
+# ===========================================================================
+# KraftController — 3-node Raft quorum for Kafka metadata (replaces ZooKeeper)
+# ===========================================================================
+apiVersion: platform.confluent.io/v1beta1
+kind: KRaftController
+metadata:
+  name: kraftcontroller
+  namespace: confluent
+  annotations:
+    # Human-readable description for tooling
+    description: "KRaft metadata quorum — 3 replicas, mTLS enabled"
+spec:
+  # -------------------------------------------------------------------------
+  # Replica count — must be an odd number for quorum (1, 3, 5, ...)
+  # -------------------------------------------------------------------------
+  replicas: 3
+
+  # -------------------------------------------------------------------------
+  # Container images
+  # -------------------------------------------------------------------------
+  image:
+    application: confluentinc/cp-server:7.7.0
+    init: confluentinc/confluent-init-container:2.9.0
+
+  # -------------------------------------------------------------------------
+  # Persistent storage — local-path provisioner is provided by K3D by default
+  # -------------------------------------------------------------------------
+  dataVolumeCapacity: 10Gi
+  storageClass:
+    name: local-path
+
+  # -------------------------------------------------------------------------
+  # TLS — references the 'kraftcontroller-tls' K8s secret (created by
+  # confluent/mtls/create-k8s-secrets.sh)
+  # Secret must contain: tls.crt, tls.key, ca.crt
+  # -------------------------------------------------------------------------
+  tls:
+    secretRef: kraftcontroller-tls
+
+  # -------------------------------------------------------------------------
+  # Controller listener — used for Raft consensus between KRaft nodes
+  # and between brokers and the KRaft quorum
+  # -------------------------------------------------------------------------
+  listeners:
+    controller:
+      tls:
+        enabled: true
+      authentication:
+        # mtls = mutual TLS; clients must present a valid certificate
+        type: mtls
+        principalMappingRules:
+          - "RULE:^CN=([a-zA-Z0-9.-]*).*$/$1/"
+          - "DEFAULT"
+
+  # -------------------------------------------------------------------------
+  # Pod resource requests/limits for KRaft controller nodes
+  # -------------------------------------------------------------------------
+  podTemplate:
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+
+---
+# ===========================================================================
+# Kafka — 3-broker cluster backed by KRaft (no ZooKeeper dependency)
+# ===========================================================================
+apiVersion: platform.confluent.io/v1beta1
+kind: Kafka
+metadata:
+  name: kafka
+  namespace: confluent
+  annotations:
+    description: "Kafka 3-broker cluster with KRaft and mTLS external listeners"
+spec:
+  # -------------------------------------------------------------------------
+  # Replica count — matches the number of K3D agent nodes
+  # -------------------------------------------------------------------------
+  replicas: 3
+
+  # -------------------------------------------------------------------------
+  # Container images
+  # -------------------------------------------------------------------------
+  image:
+    application: confluentinc/cp-server:7.7.0
+    init: confluentinc/confluent-init-container:2.9.0
+
+  # -------------------------------------------------------------------------
+  # Persistent storage — 20Gi per broker for benchmark data
+  # -------------------------------------------------------------------------
+  dataVolumeCapacity: 20Gi
+  storageClass:
+    name: local-path
+
+  # -------------------------------------------------------------------------
+  # TLS — references the 'kafka-tls' K8s secret (created by
+  # confluent/mtls/create-k8s-secrets.sh)
+  # -------------------------------------------------------------------------
+  tls:
+    secretRef: kafka-tls
+
+  # -------------------------------------------------------------------------
+  # Listeners
+  # -------------------------------------------------------------------------
+  listeners:
+    # Internal listener — used for inter-broker communication
+    internal:
+      tls:
+        enabled: true
+
+    # External listener — exposed to OMB workers via K3D NodePort mappings
+    # Each broker gets its own NodePort:
+    #   kafka-0 → NodePort 30093 → host port 9093
+    #   kafka-1 → NodePort 30094 → host port 9094
+    #   kafka-2 → NodePort 30095 → host port 9095
+    external:
+      externalAccess:
+        type: nodePort
+        nodePort:
+          host: localhost
+          # nodePortOffset: the first broker's NodePort is 30093,
+          # subsequent brokers increment by 1
+          nodePortOffset: 30093
+      tls:
+        enabled: true
+      authentication:
+        # mtls = mutual TLS; OMB clients must present a valid certificate
+        type: mtls
+        principalMappingRules:
+          - "RULE:^CN=([a-zA-Z0-9.-]*).*$/$1/"
+          - "DEFAULT"
+
+  # -------------------------------------------------------------------------
+  # KRaft dependency — points to the KraftController CR above.
+  # This REPLACES spec.dependencies.zookeeper — there is NO ZooKeeper.
+  # -------------------------------------------------------------------------
+  dependencies:
+    kRaftController:
+      controllerListener:
+        tls:
+          enabled: true
+        authentication:
+          type: mtls
+      clusterRef:
+        name: kraftcontroller
+
+  # -------------------------------------------------------------------------
+  # Broker configuration overrides
+  # -------------------------------------------------------------------------
+  configOverrides:
+    server:
+      # Ensure internal topics have sufficient replication for fault tolerance
+      - "confluent.license.topic.replication.factor=3"
+      - "confluent.balancer.topic.replication.factor=3"
+      - "confluent.metadata.topic.replication.factor=3"
+      - "confluent.tier.metadata.replication.factor=3"
+      # Min in-sync replicas for benchmark topics
+      - "min.insync.replicas=2"
+      # Log retention for benchmark topics (24 hours)
+      - "log.retention.ms=86400000"
+
+  # -------------------------------------------------------------------------
+  # Pod resource requests/limits
+  # Sized for a laptop/desktop dev environment; scale up for real benchmarks
+  # -------------------------------------------------------------------------
+  podTemplate:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi

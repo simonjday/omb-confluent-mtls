@@ -1,0 +1,46 @@
+# driver-kafka.yaml — OMB Kafka benchmark driver configuration
+#
+# Configures the OMB Kafka driver with mTLS authentication.
+# Used by the driver container to produce/consume messages against the
+# Confluent Kafka cluster running in K3D.
+#
+# Bootstrap servers map to K3D NodePort mappings:
+#   localhost:9093 → kafka-0 (NodePort 30093)
+#   localhost:9094 → kafka-1 (NodePort 30094)
+#   localhost:9095 → kafka-2 (NodePort 30095)
+
+name: Kafka
+driverClass: io.openmessaging.benchmark.driver.kafka.KafkaBenchmarkDriver
+
+# Replication factor for benchmark topics
+replicationFactor: 3
+
+# Per-topic configuration applied when creating benchmark topics
+topicConfig: |
+  min.insync.replicas=2
+  retention.ms=86400000
+
+# Common Kafka client properties (producers and consumers)
+commonConfig: |
+  bootstrap.servers=localhost:9093,localhost:9094,localhost:9095
+  security.protocol=SSL
+  ssl.keystore.location=/certs/client.keystore.jks
+  ssl.keystore.password=changeit
+  ssl.truststore.location=/certs/client.truststore.jks
+  ssl.truststore.password=changeit
+  ssl.key.password=changeit
+
+# Producer-specific configuration
+producerConfig: |
+  acks=all
+  linger.ms=1
+  batch.size=131072
+  buffer.memory=67108864
+  compression.type=lz4
+
+# Consumer-specific configuration
+consumerConfig: |
+  auto.offset.reset=earliest
+  enable.auto.commit=false
+  fetch.min.bytes=1
+  fetch.max.wait.ms=500

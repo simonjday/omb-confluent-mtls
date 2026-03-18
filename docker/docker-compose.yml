@@ -1,0 +1,157 @@
+# docker-compose.yml — OMB multi-worker benchmark stack
+#
+# Launches three OMB workers and one OMB driver.
+# All containers share host networking so they can reach the K3D cluster's
+# NodePort-mapped Kafka brokers at localhost:9093-9095.
+#
+# Usage:
+#   docker-compose --env-file ../.env up
+#
+# Prerequisites:
+#   - K3D cluster running with Kafka NodePorts mapped to host
+#   - certs/ directory populated by confluent/mtls/generate-certs.sh
+#   - .env file in the repo root (see .gitignore)
+
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Shared environment variables for every service
+# ---------------------------------------------------------------------------
+x-common-env: &common-env
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-localhost:9093,localhost:9094,localhost:9095}
+  KEYSTORE_PASSWORD: ${KEYSTORE_PASSWORD:-changeit}
+  TRUSTSTORE_PASSWORD: ${TRUSTSTORE_PASSWORD:-changeit}
+
+# ---------------------------------------------------------------------------
+# Shared resource limits
+# ---------------------------------------------------------------------------
+x-worker-resources: &worker-resources
+  deploy:
+    resources:
+      limits:
+        cpus: "2"
+        memory: 2G
+      reservations:
+        cpus: "0.5"
+        memory: 512M
+
+networks:
+  # Attach to the K3D Docker network so containers can resolve K3D node IPs.
+  # The network is created automatically by K3D when the cluster is created.
+  k3d-confluent-benchmark:
+    external: true
+    name: k3d-confluent-benchmark
+
+services:
+  # --------------------------------------------------------------------------
+  # OMB Worker 1 — listens on :8080
+  # --------------------------------------------------------------------------
+  omb-worker-1:
+    image: omb-worker:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.omb-worker
+    container_name: omb-worker-1
+    hostname: omb-worker-1
+    network_mode: host
+    environment:
+      <<: *common-env
+    volumes:
+      - ../certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: on-failure
+    <<: *worker-resources
+
+  # --------------------------------------------------------------------------
+  # OMB Worker 2 — listens on :8081
+  # --------------------------------------------------------------------------
+  omb-worker-2:
+    image: omb-worker:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.omb-worker
+    container_name: omb-worker-2
+    hostname: omb-worker-2
+    network_mode: host
+    environment:
+      <<: *common-env
+    volumes:
+      - ../certs:/certs:ro
+    command: ["bin/benchmark-worker", "--port", "8081"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: on-failure
+    <<: *worker-resources
+
+  # --------------------------------------------------------------------------
+  # OMB Worker 3 — listens on :8082
+  # --------------------------------------------------------------------------
+  omb-worker-3:
+    image: omb-worker:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.omb-worker
+    container_name: omb-worker-3
+    hostname: omb-worker-3
+    network_mode: host
+    environment:
+      <<: *common-env
+    volumes:
+      - ../certs:/certs:ro
+    command: ["bin/benchmark-worker", "--port", "8082"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: on-failure
+    <<: *worker-resources
+
+  # --------------------------------------------------------------------------
+  # OMB Driver — waits for all workers, then runs the benchmark
+  # --------------------------------------------------------------------------
+  omb-driver:
+    image: omb-driver:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.omb-driver
+    container_name: omb-driver
+    hostname: omb-driver
+    network_mode: host
+    environment:
+      <<: *common-env
+      WORKLOAD: ${WORKLOAD:-simple-workload}
+    volumes:
+      - ../certs:/certs:ro
+      - ../omb:/workloads:ro
+      - ../results:/results
+    # Override CMD at runtime via scripts/run-benchmark.sh
+    # e.g.: bin/benchmark --drivers /workloads/driver-kafka.yaml
+    #                      --workers /workloads/workers.yaml
+    #                      /workloads/workloads/${WORKLOAD}.yaml
+    command: ["--help"]
+    depends_on:
+      omb-worker-1:
+        condition: service_healthy
+      omb-worker-2:
+        condition: service_healthy
+      omb-worker-3:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M

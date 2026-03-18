@@ -1,0 +1,36 @@
+# endurance.yaml — Long-running endurance benchmark workload
+#
+# Designed to test stability over an extended period. Runs at moderate
+# throughput across multiple topics to detect memory leaks, GC pressure,
+# and producer/consumer drift.
+#
+# Parameters:
+#   2 topics × 12 partitions
+#   4 producers @ 10,000 msg/s total, 4 consumers
+#   1 KB message size
+#   5 min warm-up + 30 min test
+
+name: endurance-benchmark
+
+# Topic configuration
+topics: 2
+partitionsPerTopic: 12
+
+# Message size
+messageSize: 1024
+payloadFile: "payload/payload-1Kb.data"
+
+# Subscription / consumer configuration
+subscriptionsPerTopic: 1
+consumerPerSubscription: 4
+
+# Producer configuration
+producersPerTopic: 4
+producerRate: 10000
+
+# Consumer backlog (0 = no backlog, start consuming from live)
+consumerBacklogSizeGB: 0
+
+# Duration
+warmupDurationMinutes: 5
+testDurationMinutes: 30

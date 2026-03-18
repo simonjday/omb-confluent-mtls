@@ -1,0 +1,84 @@
+# k3d-cluster-config.yaml
+# K3D cluster configuration for the Confluent Benchmark platform.
+#
+# Creates a cluster named "confluent-benchmark" with:
+#   - 1 control-plane server
+#   - 3 worker agent nodes
+#   - NodePort mappings for Kafka external listeners (9093-9095)
+#   - K8s API accessible on host port 6443
+#   - Traefik ingress controller disabled (not needed)
+#
+# Usage:
+#   k3d cluster create --config k3d/k3d-cluster-config.yaml
+
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+
+metadata:
+  name: confluent-benchmark
+
+# ---------------------------------------------------------------------------
+# Node topology
+# ---------------------------------------------------------------------------
+servers: 1   # Control-plane / etcd node
+agents: 3    # Worker nodes (one per Kafka broker)
+
+# ---------------------------------------------------------------------------
+# Container image for all K3D nodes
+# ---------------------------------------------------------------------------
+image: rancher/k3s:v1.29.4-k3s1
+
+# ---------------------------------------------------------------------------
+# Port mappings from host → K3D load-balancer → NodePort services
+#
+# Each Kafka broker is exposed on a distinct host port so OMB can reach
+# individual brokers for bootstrap discovery.
+#
+# Port layout:
+#   9093 → Kafka broker 0 (kafka-0)  NodePort 30093
+#   9094 → Kafka broker 1 (kafka-1)  NodePort 30094
+#   9095 → Kafka broker 2 (kafka-2)  NodePort 30095
+#   6443 → Kubernetes API server
+# ---------------------------------------------------------------------------
+ports:
+  - port: 9093:9093
+    nodeFilters:
+      - loadbalancer
+  - port: 9094:9094
+    nodeFilters:
+      - loadbalancer
+  - port: 9095:9095
+    nodeFilters:
+      - loadbalancer
+
+# ---------------------------------------------------------------------------
+# K3D options
+# ---------------------------------------------------------------------------
+options:
+  k3d:
+    wait: true          # Wait for all nodes to be ready before returning
+    timeout: "300s"     # Maximum time to wait for cluster creation
+    disableLoadbalancer: false
+    disableImageVolume: false
+  k3s:
+    extraArgs:
+      # Disable Traefik ingress controller — not needed for this benchmark
+      - arg: "--disable=traefik"
+        nodeFilters:
+          - server:*
+  runtime:
+    gpuRequest: ""
+    serversMemory: ""
+    agentsMemory: ""
+
+# ---------------------------------------------------------------------------
+# Networking
+# ---------------------------------------------------------------------------
+network: k3d-confluent-benchmark  # Docker network name (shared with OMB containers)
+
+# ---------------------------------------------------------------------------
+# Registries (none required — images pulled from Docker Hub)
+# ---------------------------------------------------------------------------
+registries:
+  use: []
+  create: null

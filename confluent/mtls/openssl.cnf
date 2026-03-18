@@ -1,0 +1,144 @@
+# openssl.cnf — OpenSSL configuration for mTLS certificate generation
+#
+# Sections:
+#   [ca]                    — Certificate Authority
+#   [broker_san]            — Kafka broker Subject Alternative Names
+#   [kraftcontroller_san]   — KRaft controller Subject Alternative Names
+#   [client_san]            — OMB client Subject Alternative Names
+#
+# Used by:  confluent/mtls/generate-certs.sh
+
+# ---------------------------------------------------------------------------
+# Default CA settings
+# ---------------------------------------------------------------------------
+[ca]
+default_ca = CA_default
+
+[CA_default]
+dir               = ./certs/ca
+certs             = $dir/certs
+crl_dir           = $dir/crl
+new_certs_dir     = $dir/newcerts
+database          = $dir/index.txt
+serial            = $dir/serial
+RANDFILE          = $dir/.rand
+private_key       = $dir/ca.key
+certificate       = $dir/ca.crt
+default_days      = 3650
+default_md        = sha256
+preserve          = no
+policy            = policy_strict
+copy_extensions   = copy
+
+[policy_strict]
+countryName             = optional
+stateOrProvinceName     = optional
+localityName            = optional
+organizationName        = optional
+organizationalUnitName  = optional
+commonName              = supplied
+emailAddress            = optional
+
+# ---------------------------------------------------------------------------
+# req defaults — used when generating CSRs and self-signed certs
+# ---------------------------------------------------------------------------
+[req]
+default_bits        = 4096
+default_md          = sha256
+default_keyfile     = privkey.pem
+distinguished_name  = req_distinguished_name
+x509_extensions     = v3_ca
+req_extensions      = v3_req
+prompt              = no
+string_mask         = utf8only
+
+[req_distinguished_name]
+C   = GB
+ST  = England
+L   = London
+O   = OMB Confluent Benchmark
+OU  = Platform Engineering
+CN  = OMB Root CA
+
+[v3_req]
+basicConstraints = CA:FALSE
+keyUsage         = nonRepudiation, digitalSignature, keyEncipherment
+subjectAltName   = @broker_san
+
+# ---------------------------------------------------------------------------
+# CA certificate extensions
+# ---------------------------------------------------------------------------
+[v3_ca]
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints       = critical, CA:true, pathlen:0
+keyUsage               = critical, digitalSignature, cRLSign, keyCertSign
+
+# ---------------------------------------------------------------------------
+# Kafka broker SANs
+# Covers in-cluster DNS, wildcard, and localhost (for K3D NodePort access)
+# ---------------------------------------------------------------------------
+[broker_san]
+subjectAltName = @broker_alt_names
+
+[broker_alt_names]
+DNS.1  = kafka-0.kafka.confluent.svc.cluster.local
+DNS.2  = kafka-1.kafka.confluent.svc.cluster.local
+DNS.3  = kafka-2.kafka.confluent.svc.cluster.local
+DNS.4  = *.kafka.confluent.svc.cluster.local
+DNS.5  = kafka.confluent.svc.cluster.local
+DNS.6  = localhost
+IP.1   = 127.0.0.1
+
+# Extensions applied to broker certificates
+[broker_cert_ext]
+basicConstraints       = CA:FALSE
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, digitalSignature, keyEncipherment
+extendedKeyUsage       = serverAuth, clientAuth
+subjectAltName         = @broker_alt_names
+
+# ---------------------------------------------------------------------------
+# KRaft controller SANs
+# Covers in-cluster DNS for controller nodes
+# ---------------------------------------------------------------------------
+[kraftcontroller_san]
+subjectAltName = @kraftcontroller_alt_names
+
+[kraftcontroller_alt_names]
+DNS.1  = kraftcontroller-0.kraftcontroller.confluent.svc.cluster.local
+DNS.2  = kraftcontroller-1.kraftcontroller.confluent.svc.cluster.local
+DNS.3  = kraftcontroller-2.kraftcontroller.confluent.svc.cluster.local
+DNS.4  = *.kraftcontroller.confluent.svc.cluster.local
+DNS.5  = kraftcontroller.confluent.svc.cluster.local
+DNS.6  = localhost
+IP.1   = 127.0.0.1
+
+# Extensions applied to KRaft controller certificates
+[kraftcontroller_cert_ext]
+basicConstraints       = CA:FALSE
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, digitalSignature, keyEncipherment
+extendedKeyUsage       = serverAuth, clientAuth
+subjectAltName         = @kraftcontroller_alt_names
+
+# ---------------------------------------------------------------------------
+# OMB client SANs
+# ---------------------------------------------------------------------------
+[client_san]
+subjectAltName = @client_alt_names
+
+[client_alt_names]
+DNS.1  = localhost
+IP.1   = 127.0.0.1
+
+# Extensions applied to client certificates
+[client_cert_ext]
+basicConstraints       = CA:FALSE
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, digitalSignature, keyEncipherment
+extendedKeyUsage       = clientAuth
+subjectAltName         = @client_alt_names

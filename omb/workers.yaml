@@ -1,0 +1,12 @@
+# workers.yaml — OMB worker endpoints
+#
+# Lists the HTTP endpoints of all OMB worker processes.
+# Workers run in Docker containers with host networking, so they are
+# reachable at localhost on ports 8080, 8081, and 8082.
+#
+# The driver uses these endpoints to distribute benchmark load.
+
+workers:
+  - http://localhost:8080
+  - http://localhost:8081
+  - http://localhost:8082
