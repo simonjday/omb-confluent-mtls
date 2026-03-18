@@ -1,0 +1,36 @@
+# low-latency.yaml — Low-latency benchmark workload
+#
+# Designed to measure end-to-end publish latency at low throughput.
+# Uses small messages and a single producer/consumer pair to minimise
+# batching delays.
+#
+# Parameters:
+#   1 topic × 6 partitions
+#   1 producer @ 500 msg/s, 1 consumer
+#   512 B message size
+#   2 min warm-up + 5 min test
+
+name: low-latency-benchmark
+
+# Topic configuration
+topics: 1
+partitionsPerTopic: 6
+
+# Message size
+messageSize: 512
+payloadFile: "payload/payload-512b.data"
+
+# Subscription / consumer configuration
+subscriptionsPerTopic: 1
+consumerPerSubscription: 1
+
+# Producer configuration
+producersPerTopic: 1
+producerRate: 500
+
+# Consumer backlog (0 = no backlog)
+consumerBacklogSizeGB: 0
+
+# Duration
+warmupDurationMinutes: 2
+testDurationMinutes: 5

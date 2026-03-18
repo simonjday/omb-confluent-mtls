@@ -1,0 +1,81 @@
+# confluent-operator.yaml
+# Helm values for the Confluent for Kubernetes (CFK) operator.
+#
+# Install with:
+#   helm repo add confluentinc https://packages.confluent.io/helm
+#   helm repo update
+#   helm install confluent-operator confluentinc/confluent-for-kubernetes \
+#     --namespace confluent \
+#     --version 0.824.32 \
+#     -f confluent/confluent-operator.yaml
+#
+# Or use the automated script:
+#   ./k3d/setup-k3d.sh
+
+# ---------------------------------------------------------------------------
+# Operator scope
+# ---------------------------------------------------------------------------
+# namespaced=true means the operator only watches the 'confluent' namespace.
+# Set to false if you want cluster-wide operator scope.
+namespaced: true
+
+# ---------------------------------------------------------------------------
+# Operator image
+# ---------------------------------------------------------------------------
+# Uses the default Confluent registry. Override if using a private registry.
+image:
+  registry: docker.io
+  repository: confluentinc/confluent-operator
+  # tag is intentionally omitted — Helm chart appVersion is used
+
+# ---------------------------------------------------------------------------
+# Resource limits for the operator pod
+# ---------------------------------------------------------------------------
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# Operator log level
+# ---------------------------------------------------------------------------
+logLevel: info
+
+# ---------------------------------------------------------------------------
+# License
+# ---------------------------------------------------------------------------
+# For development/evaluation, CFK runs in a 30-day trial mode.
+# For production, set your license key here or via a secret.
+# licenseKey: ""
+# licenseSecretRef: ""
+
+# ---------------------------------------------------------------------------
+# Pod affinity / tolerations (optional)
+# ---------------------------------------------------------------------------
+# Uncomment to control operator pod placement on specific nodes:
+# nodeSelector: {}
+# tolerations: []
+# affinity: {}
+
+# ---------------------------------------------------------------------------
+# Service account
+# ---------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  # annotations: {}
+
+# ---------------------------------------------------------------------------
+# Webhook configuration
+# ---------------------------------------------------------------------------
+# CFK uses admission webhooks for resource validation.
+webhook:
+  enabled: true
+
+# ---------------------------------------------------------------------------
+# Pod disruption budget
+# ---------------------------------------------------------------------------
+podDisruptionBudget:
+  enabled: false

@@ -1,0 +1,35 @@
+# high-throughput.yaml — High-throughput benchmark workload
+#
+# Designed to saturate the Kafka cluster and measure maximum sustainable
+# throughput across multiple topics and partitions.
+#
+# Parameters:
+#   4 topics × 16 partitions
+#   8 producers @ 100,000 msg/s total, 8 consumers
+#   1 KB message size
+#   2 min warm-up + 5 min test
+
+name: high-throughput-benchmark
+
+# Topic configuration
+topics: 4
+partitionsPerTopic: 16
+
+# Message size
+messageSize: 1024
+payloadFile: "payload/payload-1Kb.data"
+
+# Subscription / consumer configuration
+subscriptionsPerTopic: 1
+consumerPerSubscription: 8
+
+# Producer configuration
+producersPerTopic: 8
+producerRate: 100000
+
+# Consumer backlog (0 = no backlog, start consuming from live)
+consumerBacklogSizeGB: 0
+
+# Duration
+warmupDurationMinutes: 2
+testDurationMinutes: 5

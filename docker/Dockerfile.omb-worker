@@ -1,0 +1,47 @@
+# OMB Worker Dockerfile
+# Builds the Open Messaging Benchmark worker process from source.
+# Workers accept benchmark tasks from the driver and produce/consume messages.
+
+FROM eclipse-temurin:17-jdk AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    maven \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Clone and build OMB from source
+RUN git clone https://github.com/openmessaging/benchmark.git . \
+    && mvn clean install -DskipTests -T 4
+
+# -------------------------------------------------------
+# Runtime image
+# -------------------------------------------------------
+FROM eclipse-temurin:17-jdk
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/benchmark
+
+# Copy built artifacts from builder stage
+COPY --from=builder /build/package/target/openmessaging-benchmark-0.0.1-SNAPSHOT-bin.tar.gz /tmp/omb.tar.gz
+
+RUN tar -xzf /tmp/omb.tar.gz --strip-components=1 -C /opt/benchmark \
+    && rm /tmp/omb.tar.gz
+
+# Volume mount point for mTLS certificates
+VOLUME ["/certs"]
+
+# Worker HTTP port
+EXPOSE 8080
+
+# Health check: verify worker HTTP endpoint is responding
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
+    CMD curl -f http://localhost:8080/ping || exit 1
+
+# Start the OMB worker process
+CMD ["bin/benchmark-worker", "--port", "8080"]

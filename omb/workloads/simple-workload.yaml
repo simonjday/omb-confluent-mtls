@@ -1,0 +1,35 @@
+# simple-workload.yaml — Minimal benchmark workload for smoke testing
+#
+# Suitable for validating connectivity and mTLS configuration before
+# running more demanding workloads.
+#
+# Parameters:
+#   1 topic × 1 partition
+#   1 producer @ 1,000 msg/s, 1 consumer
+#   1 KB message size
+#   1 min warm-up + 2 min test
+
+name: simple-benchmark
+
+# Topic configuration
+topics: 1
+partitionsPerTopic: 1
+
+# Message size
+messageSize: 1024
+payloadFile: "payload/payload-1Kb.data"
+
+# Subscription / consumer configuration
+subscriptionsPerTopic: 1
+consumerPerSubscription: 1
+
+# Producer configuration
+producersPerTopic: 1
+producerRate: 1000
+
+# Consumer backlog (0 = no backlog, start consuming from live)
+consumerBacklogSizeGB: 0
+
+# Duration
+warmupDurationMinutes: 1
+testDurationMinutes: 2
