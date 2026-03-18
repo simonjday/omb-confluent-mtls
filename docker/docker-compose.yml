@@ -47,10 +47,10 @@ services:
   # OMB Worker 1 — listens on :8080
   # --------------------------------------------------------------------------
   omb-worker-1:
-    image: omb-worker:latest
+    image: omb:latest
     build:
       context: .
-      dockerfile: Dockerfile.omb-worker
+      dockerfile: Dockerfile
     container_name: omb-worker-1
     hostname: omb-worker-1
     network_mode: host
@@ -59,7 +59,7 @@ services:
     volumes:
       - ../certs:/certs:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/ping"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/ping || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -71,10 +71,10 @@ services:
   # OMB Worker 2 — listens on :8081
   # --------------------------------------------------------------------------
   omb-worker-2:
-    image: omb-worker:latest
+    image: omb:latest
     build:
       context: .
-      dockerfile: Dockerfile.omb-worker
+      dockerfile: Dockerfile
     container_name: omb-worker-2
     hostname: omb-worker-2
     network_mode: host
@@ -84,7 +84,7 @@ services:
       - ../certs:/certs:ro
     command: ["bin/benchmark-worker", "--port", "8081"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/ping"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/ping || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -96,10 +96,10 @@ services:
   # OMB Worker 3 — listens on :8082
   # --------------------------------------------------------------------------
   omb-worker-3:
-    image: omb-worker:latest
+    image: omb:latest
     build:
       context: .
-      dockerfile: Dockerfile.omb-worker
+      dockerfile: Dockerfile
     container_name: omb-worker-3
     hostname: omb-worker-3
     network_mode: host
@@ -109,7 +109,7 @@ services:
       - ../certs:/certs:ro
     command: ["bin/benchmark-worker", "--port", "8082"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/ping"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8082/ping || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -121,10 +121,10 @@ services:
   # OMB Driver — waits for all workers, then runs the benchmark
   # --------------------------------------------------------------------------
   omb-driver:
-    image: omb-driver:latest
+    image: omb:latest
     build:
       context: .
-      dockerfile: Dockerfile.omb-driver
+      dockerfile: Dockerfile
     container_name: omb-driver
     hostname: omb-driver
     network_mode: host
@@ -135,11 +135,18 @@ services:
       - ../certs:/certs:ro
       - ../omb:/workloads:ro
       - ../results:/results
-    # Override CMD at runtime via scripts/run-benchmark.sh
+    entrypoint: ["bin/benchmark"]
+    # Override command at runtime via scripts/run-benchmark.sh
     # e.g.: bin/benchmark --drivers /workloads/driver-kafka.yaml
     #                      --workers /workloads/workers.yaml
     #                      /workloads/workloads/${WORKLOAD}.yaml
     command: ["--help"]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'bin/benchmark$' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       omb-worker-1:
         condition: service_healthy

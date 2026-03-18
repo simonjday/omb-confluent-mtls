@@ -49,6 +49,7 @@ A complete, production-ready Docker-based multi-worker **Open Messaging Benchmar
 | Cluster | **K3D** (Docker-based K8s) | Runs on a laptop |
 | Operator | **CFK** (Confluent for Kubernetes) | Manages Kafka lifecycle |
 | Benchmarking | **OMB** (Open Messaging Benchmark) | Industry-standard load testing |
+| OMB image | **Single unified `omb:latest`** | Worker and driver from one build |
 
 ---
 
@@ -86,7 +87,7 @@ This will:
 3. Generate mTLS certificates (CA, broker, controller, client)
 4. Create Kubernetes secrets
 5. Deploy `KRaftController` (3 replicas) and `Kafka` (3 brokers)
-6. Build OMB Docker images
+6. Build the OMB Docker image
 
 Or run each step manually:
 
@@ -221,7 +222,7 @@ The default configuration runs **3 OMB workers** (ports 8080–8082). To add mor
 
 ```yaml
 omb-worker-4:
-  image: omb-worker:latest
+  image: omb:latest
   container_name: omb-worker-4
   network_mode: host
   volumes:
@@ -355,8 +356,7 @@ omb-confluent-mtls/
 ├── README.md                     # This file
 │
 ├── docker/
-│   ├── Dockerfile.omb-worker     # OMB worker image (port 8080+)
-│   ├── Dockerfile.omb-driver     # OMB driver image
+│   ├── Dockerfile                # Unified OMB image (worker and driver)
 │   └── docker-compose.yml        # 3 workers + 1 driver
 │
 ├── k3d/
@@ -384,7 +384,7 @@ omb-confluent-mtls/
 ├── scripts/
 │   ├── setup-all.sh             # Full end-to-end setup
 │   ├── run-benchmark.sh         # Start workers + run workload
-│   ├── build-omb-images.sh      # Build Docker images
+│   ├── build-omb-images.sh      # Build the unified omb:latest image
 │   ├── teardown.sh              # Stop + delete everything
 │   └── collect-results.sh       # Print results summary
 │

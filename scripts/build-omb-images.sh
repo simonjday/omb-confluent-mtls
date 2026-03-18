@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# build-omb-images.sh — Build OMB worker and driver Docker images
+# build-omb-images.sh — Build the unified OMB Docker image
 #
 # Builds:
-#   omb-worker:latest   — OMB worker process (accepts benchmark tasks)
-#   omb-driver:latest   — OMB driver (orchestrates workers, runs workloads)
+#   omb:latest   — Single image that runs as either worker or driver
+#                  Worker mode: docker run omb:latest (default CMD)
+#                  Driver mode: docker run omb:latest bin/benchmark ...
 #
-# Tags each image with both 'latest' and a timestamp-based version tag.
+# Tags the image with both 'latest' and a timestamp-based version tag.
 #
 # Usage:
 #   ./scripts/build-omb-images.sh [--no-cache]
@@ -31,7 +32,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [--no-cache]
 
-Builds omb-worker and omb-driver Docker images from docker/.
+Builds the unified omb Docker image from docker/Dockerfile.
 
 Options:
   --no-cache   Pass --no-cache to docker build
@@ -51,32 +52,18 @@ if [[ "${NO_CACHE}" == "--no-cache" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Build OMB worker image
+# Build unified OMB image
 # ---------------------------------------------------------------------------
-info "Building omb-worker image (version: ${VERSION})..."
+info "Building omb image (version: ${VERSION})..."
 docker build \
   ${BUILD_ARGS} \
-  -f "${DOCKER_DIR}/Dockerfile.omb-worker" \
-  -t "omb-worker:${VERSION}" \
-  -t "omb-worker:latest" \
+  -f "${DOCKER_DIR}/Dockerfile" \
+  -t "omb:${VERSION}" \
+  -t "omb:latest" \
   "${DOCKER_DIR}"
 
-info "  Tagged: omb-worker:${VERSION}"
-info "  Tagged: omb-worker:latest"
-
-# ---------------------------------------------------------------------------
-# Build OMB driver image
-# ---------------------------------------------------------------------------
-info "Building omb-driver image (version: ${VERSION})..."
-docker build \
-  ${BUILD_ARGS} \
-  -f "${DOCKER_DIR}/Dockerfile.omb-driver" \
-  -t "omb-driver:${VERSION}" \
-  -t "omb-driver:latest" \
-  "${DOCKER_DIR}"
-
-info "  Tagged: omb-driver:${VERSION}"
-info "  Tagged: omb-driver:latest"
+info "  Tagged: omb:${VERSION}"
+info "  Tagged: omb:latest"
 
 # ---------------------------------------------------------------------------
 # Summary
@@ -84,11 +71,16 @@ info "  Tagged: omb-driver:latest"
 cat <<EOF
 
 [INFO]  ============================================================
-[INFO]  OMB Docker images built successfully.
+[INFO]  OMB Docker image built successfully.
 [INFO]
-[INFO]  Images:
-[INFO]    omb-worker:latest  ($(docker image inspect omb-worker:latest --format '{{.Size}}' | numfmt --to=iec))
-[INFO]    omb-driver:latest  ($(docker image inspect omb-driver:latest --format '{{.Size}}' | numfmt --to=iec))
+[INFO]  Image:
+[INFO]    omb:latest  ($(docker image inspect omb:latest --format '{{.Size}}' | numfmt --to=iec))
+[INFO]
+[INFO]  Worker mode (default):
+[INFO]    docker run omb:latest
+[INFO]
+[INFO]  Driver mode:
+[INFO]    docker run omb:latest bin/benchmark --drivers ... --workers ...
 [INFO]
 [INFO]  Run a benchmark:
 [INFO]    ./scripts/run-benchmark.sh [workload-name]
