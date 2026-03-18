@@ -147,6 +147,92 @@ kubectl get pods -n confluent -w
 
 ---
 
+## Running with Docker (without Compose)
+
+Use these commands when you want to run the unified `omb:latest` image directly — useful for quick testing, CI pipelines, or environments where docker-compose isn't available.
+
+### 1. Build the image
+
+```bash
+docker build -t omb:latest -f docker/Dockerfile docker/
+```
+
+### 2. Start workers (run each in a separate terminal)
+
+```bash
+# Worker 1 (port 8080 — default)
+docker run -d --name omb-worker-1 \
+  --network host \
+  -v "$(pwd)/certs:/certs:ro" \
+  omb:latest
+
+# Worker 2 (port 8081)
+docker run -d --name omb-worker-2 \
+  --network host \
+  -v "$(pwd)/certs:/certs:ro" \
+  omb:latest bin/benchmark-worker --port 8081
+
+# Worker 3 (port 8082)
+docker run -d --name omb-worker-3 \
+  --network host \
+  -v "$(pwd)/certs:/certs:ro" \
+  omb:latest bin/benchmark-worker --port 8082
+```
+
+### 3. Verify workers are healthy
+
+```bash
+curl -s http://localhost:8080/ping
+curl -s http://localhost:8081/ping
+curl -s http://localhost:8082/ping
+```
+
+### 4. Run a benchmark (driver mode)
+
+```bash
+# Simple workload
+docker run --rm --name omb-driver \
+  --network host \
+  -v "$(pwd)/certs:/certs:ro" \
+  -v "$(pwd)/omb:/workloads:ro" \
+  -v "$(pwd)/results:/results" \
+  --entrypoint bin/benchmark \
+  omb:latest \
+  --drivers /workloads/driver-kafka.yaml \
+  --workers /workloads/workers.yaml \
+  /workloads/workloads/simple-workload.yaml
+
+# High-throughput workload
+docker run --rm --name omb-driver \
+  --network host \
+  -v "$(pwd)/certs:/certs:ro" \
+  -v "$(pwd)/omb:/workloads:ro" \
+  -v "$(pwd)/results:/results" \
+  --entrypoint bin/benchmark \
+  omb:latest \
+  --drivers /workloads/driver-kafka.yaml \
+  --workers /workloads/workers.yaml \
+  /workloads/workloads/high-throughput.yaml
+```
+
+### 5. Stop and clean up workers
+
+```bash
+docker stop omb-worker-1 omb-worker-2 omb-worker-3
+docker rm omb-worker-1 omb-worker-2 omb-worker-3
+```
+
+### Notes
+
+- **Worker 1** uses the Dockerfile's default `CMD` (`bin/benchmark-worker --port 8080`), so no command override is needed.
+- **Workers 2 & 3** override the command to listen on different ports.
+- **The driver** uses `--entrypoint bin/benchmark` to switch from worker mode to driver mode.
+- `--rm` on the driver container cleans it up automatically after the benchmark finishes.
+- `-d` on workers runs them in the background.
+- Results are written to the mounted `results/` directory.
+
+---
+
 ## Configuration Reference
 
 ### Environment variables (`.env` file)
