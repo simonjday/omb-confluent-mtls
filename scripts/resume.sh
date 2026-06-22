@@ -95,30 +95,48 @@ info "Kafka phase: ${kafka_phase}  |  KRaftController phase: ${kraft_phase}"
 # ---------------------------------------------------------------------------
 # 4. Port-forward optional services if they are deployed
 # ---------------------------------------------------------------------------
-if [[ "${PORT_FORWARD}" == "true" ]]; then
-  # Kill any stale port-forwards first
-  pkill -f "port-forward svc/schemaregistry"         2>/dev/null || true
-  pkill -f "port-forward svc/controlcenter-next-gen" 2>/dev/null || true
+# start_port_forward <svc> <local-port>:<remote-port> <log-file>
+# Retries for up to 60s — the kubelet cert needs a moment to regenerate
+# after node IP rotation, and endpoint slots need to be ready.
+start_port_forward() {
+  local svc="$1" ports="$2" log="$3"
+  local deadline=$(( $(date +%s) + 60 ))
+  pkill -f "port-forward svc/${svc}" 2>/dev/null || true
   sleep 1
+  while true; do
+    kubectl port-forward "svc/${svc}" "${ports}" -n "${NAMESPACE}" \
+      > "${log}" 2>&1 &
+    local pid=$!
+    sleep 3
+    if kill -0 "${pid}" 2>/dev/null && grep -q "^Forwarding" "${log}" 2>/dev/null; then
+      return 0
+    fi
+    kill "${pid}" 2>/dev/null || true
+    if (( $(date +%s) >= deadline )); then
+      return 1
+    fi
+    info "  port-forward svc/${svc} not ready yet, retrying..."
+    sleep 5
+  done
+}
 
+if [[ "${PORT_FORWARD}" == "true" ]]; then
   if kubectl get svc schemaregistry -n "${NAMESPACE}" &>/dev/null; then
-    kubectl port-forward svc/schemaregistry 8081:8081 -n "${NAMESPACE}" \
-      > /tmp/pf-schemaregistry.log 2>&1 &
-    SR_PID=$!
-    sleep 1
-    kill -0 "${SR_PID}" 2>/dev/null \
-      && success "Schema Registry port-forward running (https://localhost:8081)" \
-      || warn "Schema Registry port-forward failed — check /tmp/pf-schemaregistry.log"
+    info "Starting Schema Registry port-forward..."
+    if start_port_forward "schemaregistry" "8081:8081" "/tmp/pf-schemaregistry.log"; then
+      success "Schema Registry port-forward running (https://localhost:8081)"
+    else
+      warn "Schema Registry port-forward failed — check /tmp/pf-schemaregistry.log"
+    fi
   fi
 
   if kubectl get svc controlcenter-next-gen -n "${NAMESPACE}" &>/dev/null; then
-    kubectl port-forward svc/controlcenter-next-gen 9021:9021 -n "${NAMESPACE}" \
-      > /tmp/pf-controlcenter.log 2>&1 &
-    CC_PID=$!
-    sleep 1
-    kill -0 "${CC_PID}" 2>/dev/null \
-      && success "Control Center port-forward running  (https://localhost:9021)" \
-      || warn "Control Center port-forward failed — check /tmp/pf-controlcenter.log"
+    info "Starting Control Center port-forward..."
+    if start_port_forward "controlcenter-next-gen" "9021:9021" "/tmp/pf-controlcenter.log"; then
+      success "Control Center port-forward running  (https://localhost:9021)"
+    else
+      warn "Control Center port-forward failed — check /tmp/pf-controlcenter.log"
+    fi
   fi
 fi
 
