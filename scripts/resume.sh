@@ -39,6 +39,21 @@ fi
 
 info "Starting K3D cluster '${CLUSTER_NAME}'..."
 k3d cluster start "${CLUSTER_NAME}"
+# Node IPs change on each start — merge a fresh kubeconfig so kubectl
+# connects to the new IPs and port-forwards work correctly.
+k3d kubeconfig merge "${CLUSTER_NAME}" --kubeconfig-merge-default >/dev/null
+
+# The kubelet serving cert (serving-kubelet.crt) embeds the node's IP in its SANs.
+# After a restart the IPs change, making the old cert invalid — kubectl port-forward
+# fails with "x509: certificate is valid for <old-ip>, not <new-ip>".
+# Deleting the cert forces K3s to regenerate it with the current IP on next use.
+info "Rotating stale kubelet serving certs (node IPs change on restart)..."
+for _node in $(docker ps --filter "name=k3d-${CLUSTER_NAME}-agent" --format '{{.Names}}'); do
+  docker exec "${_node}" rm -f \
+    /var/lib/rancher/k3s/agent/serving-kubelet.crt \
+    /var/lib/rancher/k3s/agent/serving-kubelet.key 2>/dev/null || true
+done
+unset _node
 success "Cluster started."
 
 # ---------------------------------------------------------------------------
