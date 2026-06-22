@@ -73,18 +73,14 @@ info "Ensuring namespace '${NAMESPACE}' exists..."
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
 # ---------------------------------------------------------------------------
-# Helper: apply_secret — delete and recreate a secret (idempotent)
+# Helper: apply_secret — create or update a secret (idempotent, non-disruptive)
 # ---------------------------------------------------------------------------
 apply_secret() {
   local name="$1"
   shift
-  if kubectl get secret "${name}" -n "${NAMESPACE}" &>/dev/null; then
-    info "Secret '${name}' already exists — deleting and recreating..."
-    kubectl delete secret "${name}" -n "${NAMESPACE}"
-  fi
-  info "Creating secret '${name}'..."
-  kubectl "$@" -n "${NAMESPACE}"
-  info "  Secret '${name}' created."
+  info "Applying secret '${name}'..."
+  kubectl "$@" -n "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+  info "  Secret '${name}' applied."
 }
 
 # ---------------------------------------------------------------------------

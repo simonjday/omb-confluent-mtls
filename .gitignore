@@ -5,3 +5,9 @@ certs/
 *.key
 results/
 .env
+node_modules/
+package.json
+package-lock.json
+medium-post.js
+medium-post.docx
+~$*

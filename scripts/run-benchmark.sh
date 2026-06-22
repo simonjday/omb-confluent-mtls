@@ -32,7 +32,6 @@ OMB_DIR="${REPO_ROOT}/omb"
 RESULTS_DIR="${REPO_ROOT}/results"
 WORKLOAD="${1:-simple-workload}"
 WORKLOAD_FILE="${OMB_DIR}/workloads/${WORKLOAD}.yaml"
-WORKER_PORTS=(8080 8081 8082)
 WORKER_TIMEOUT=120
 
 # ---------------------------------------------------------------------------
@@ -84,26 +83,32 @@ DC_CMD="${DC} -f ${DOCKER_DIR}/docker-compose.yml --env-file ${REPO_ROOT}/.env"
 [[ -f "${REPO_ROOT}/.env" ]] || DC_CMD="${DC} -f ${DOCKER_DIR}/docker-compose.yml"
 
 # ---------------------------------------------------------------------------
-# Start workers
+# Start workers (stop any existing ones first to avoid port conflicts)
 # ---------------------------------------------------------------------------
+info "Stopping any existing OMB workers..."
+${DC_CMD} down --remove-orphans 2>/dev/null || true
+
 info "Starting OMB workers..."
 ${DC_CMD} up -d omb-worker-1 omb-worker-2 omb-worker-3
 
 # ---------------------------------------------------------------------------
-# Wait for workers to be healthy
+# Wait for workers to be healthy (via Docker healthcheck — host networking
+# means worker ports are inside the Docker Desktop VM on macOS, not on the
+# Mac's localhost, so we poll Docker's built-in health status instead)
 # ---------------------------------------------------------------------------
 info "Waiting for workers to be healthy (timeout: ${WORKER_TIMEOUT}s)..."
 DEADLINE=$(( $(date +%s) + WORKER_TIMEOUT ))
 
-for port in "${WORKER_PORTS[@]}"; do
-  info "  Waiting for worker on port ${port}..."
-  until curl -sf "http://localhost:${port}/ping" &>/dev/null; do
+for name in omb-worker-1 omb-worker-2 omb-worker-3; do
+  info "  Waiting for ${name} to be healthy..."
+  until [[ "$(docker inspect --format='{{.State.Health.Status}}' "${name}" 2>/dev/null)" == "healthy" ]]; do
     if [[ $(date +%s) -gt ${DEADLINE} ]]; then
-      error "Timed out waiting for OMB worker on port ${port}"
+      docker logs "${name}" --tail 20 >&2
+      error "Timed out waiting for ${name} to become healthy"
     fi
-    sleep 3
+    sleep 5
   done
-  info "  Worker on port ${port} is healthy."
+  info "  ${name} is healthy."
 done
 
 # ---------------------------------------------------------------------------
@@ -119,11 +124,10 @@ info "  Results will be written to: ${RESULT_FILE}"
 ${DC_CMD} run --rm \
   -v "${RESULTS_DIR}:/results" \
   omb-driver \
-  bin/benchmark \
-    --drivers /workloads/driver-kafka.yaml \
-    --workers /workloads/workers.yaml \
-    --output /results/"$(basename "${RESULT_FILE}")" \
-    /workloads/workloads/"${WORKLOAD}.yaml"
+  --drivers /workloads/driver-kafka.yaml \
+  --workers-file /workloads/workers.yaml \
+  --output /results/"$(basename "${RESULT_FILE}")" \
+  /workloads/workloads/"${WORKLOAD}.yaml"
 
 # ---------------------------------------------------------------------------
 # Show results summary

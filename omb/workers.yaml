@@ -2,11 +2,12 @@
 #
 # Lists the HTTP endpoints of all OMB worker processes.
 # Workers run in Docker containers with host networking, so they are
-# reachable at localhost on ports 8080, 8081, and 8082.
+# reachable at localhost on ports 8080, 8082, and 8084.
+# Ports are spaced 2 apart because OMB uses port N+1 for Prometheus metrics.
 #
 # The driver uses these endpoints to distribute benchmark load.
 
 workers:
   - http://localhost:8080
-  - http://localhost:8081
   - http://localhost:8082
+  - http://localhost:8084

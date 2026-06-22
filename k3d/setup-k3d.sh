@@ -24,7 +24,7 @@ CONFLUENT_NAMESPACE="confluent"
 HELM_REPO_NAME="confluentinc"
 HELM_REPO_URL="https://packages.confluent.io/helm"
 CFK_CHART="confluentinc/confluent-for-kubernetes"
-CFK_VERSION="0.824.32"  # Pin to a known-good version; update as needed
+CFK_VERSION="0.1514.40"  # Pin to a known-good version; update as needed
 DRY_RUN="${1:-}"
 
 # ---------------------------------------------------------------------------

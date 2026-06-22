@@ -199,7 +199,7 @@ docker run --rm --name omb-driver \
   --entrypoint bin/benchmark \
   omb:latest \
   --drivers /workloads/driver-kafka.yaml \
-  --workers /workloads/workers.yaml \
+  --workers-file /workloads/workers.yaml \
   /workloads/workloads/simple-workload.yaml
 
 # High-throughput workload
@@ -211,7 +211,7 @@ docker run --rm --name omb-driver \
   --entrypoint bin/benchmark \
   omb:latest \
   --drivers /workloads/driver-kafka.yaml \
-  --workers /workloads/workers.yaml \
+  --workers-file /workloads/workers.yaml \
   /workloads/workloads/high-throughput.yaml
 ```
 

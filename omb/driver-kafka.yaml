@@ -4,10 +4,11 @@
 # Used by the driver container to produce/consume messages against the
 # Confluent Kafka cluster running in K3D.
 #
-# Bootstrap servers map to K3D NodePort mappings:
-#   localhost:9093 → kafka-0 (NodePort 30093)
-#   localhost:9094 → kafka-1 (NodePort 30094)
-#   localhost:9095 → kafka-2 (NodePort 30095)
+# Bootstrap servers map to K3D LB → NodePort services:
+#   localhost:9093 → kafka-bootstrap-np (NodePort 9093)
+#   localhost:9094 → kafka-0-np         (NodePort 9094)
+#   localhost:9095 → kafka-1-np         (NodePort 9095)
+#   localhost:9096 → kafka-2-np         (NodePort 9096)
 
 name: Kafka
 driverClass: io.openmessaging.benchmark.driver.kafka.KafkaBenchmarkDriver
@@ -22,7 +23,7 @@ topicConfig: |
 
 # Common Kafka client properties (producers and consumers)
 commonConfig: |
-  bootstrap.servers=localhost:9093,localhost:9094,localhost:9095
+  bootstrap.servers=localhost:9093,localhost:9094,localhost:9095,localhost:9096
   security.protocol=SSL
   ssl.keystore.location=/certs/client.keystore.jks
   ssl.keystore.password=changeit

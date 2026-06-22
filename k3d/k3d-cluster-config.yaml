@@ -31,14 +31,16 @@ image: rancher/k3s:v1.29.4-k3s1
 # ---------------------------------------------------------------------------
 # Port mappings from host → K3D load-balancer → NodePort services
 #
-# Each Kafka broker is exposed on a distinct host port so OMB can reach
-# individual brokers for bootstrap discovery.
+# Format: hostPort:containerPort — K3D nginx proxies containerPort to K3D
+# agent nodes on the SAME port number. The Kafka NodePort values must
+# therefore match these container ports (9093-9096), which requires
+# extending K3S's NodePort range (see extraArgs below).
 #
 # Port layout:
-#   9093 → Kafka broker 0 (kafka-0)  NodePort 30093
-#   9094 → Kafka broker 1 (kafka-1)  NodePort 30094
-#   9095 → Kafka broker 2 (kafka-2)  NodePort 30095
-#   6443 → Kubernetes API server
+#   9093 → kafka-bootstrap-np  NodePort 9093 (bootstrap endpoint)
+#   9094 → kafka-0-np          NodePort 9094 (kafka-0 external)
+#   9095 → kafka-1-np          NodePort 9095 (kafka-1 external)
+#   9096 → kafka-2-np          NodePort 9096 (kafka-2 external)
 # ---------------------------------------------------------------------------
 ports:
   - port: 9093:9093
@@ -48,6 +50,9 @@ ports:
     nodeFilters:
       - loadbalancer
   - port: 9095:9095
+    nodeFilters:
+      - loadbalancer
+  - port: 9096:9096
     nodeFilters:
       - loadbalancer
 
@@ -66,6 +71,13 @@ options:
       - arg: "--disable=traefik"
         nodeFilters:
           - server:*
+      # Extend NodePort range to allow ports 9093-9096 for Kafka external
+      # listeners. K3D nginx proxies to agent nodes on the same port number
+      # as the containerPort, so Kafka's NodePort values must match the LB
+      # port mappings above. Default K3S range (30000-32767) is too high.
+      - arg: "--kube-apiserver-arg=--service-node-port-range=9000-32767"
+        nodeFilters:
+          - server:*
   runtime:
     gpuRequest: ""
     serversMemory: ""
@@ -81,4 +93,3 @@ network: k3d-confluent-benchmark  # Docker network name (shared with OMB contain
 # ---------------------------------------------------------------------------
 registries:
   use: []
-  create: null

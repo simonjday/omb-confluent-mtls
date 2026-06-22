@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 
 RUN git clone https://github.com/openmessaging/benchmark.git . \
-    && mvn clean install -DskipTests -T 4
+    && mvn spotless:apply -T 4 \
+    && mvn clean install -DskipTests -Dspotless.check.skip=true -Dspotbugs.skip=true -T 4
 
 # -------------------------------------------------------
 # Runtime image

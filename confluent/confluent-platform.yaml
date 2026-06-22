@@ -128,19 +128,21 @@ spec:
       tls:
         enabled: true
 
-    # External listener — exposed to OMB workers via K3D NodePort mappings
-    # Each broker gets its own NodePort:
-    #   kafka-0 → NodePort 30093 → host port 9093
-    #   kafka-1 → NodePort 30094 → host port 9094
-    #   kafka-2 → NodePort 30095 → host port 9095
+    # External listener — exposed to OMB workers via K3D NodePort mappings.
+    # nodePortOffset=9093 means CFK creates NodePort services at:
+    #   kafka-bootstrap-np: NodePort 9093 (bootstrap)
+    #   kafka-0-np:         NodePort 9094 (kafka-0 advertised as localhost:9094)
+    #   kafka-1-np:         NodePort 9095 (kafka-1 advertised as localhost:9095)
+    #   kafka-2-np:         NodePort 9096 (kafka-2 advertised as localhost:9096)
+    # K3D LB maps host 9093-9096 to agent nodes on the same ports, so OMB
+    # can reach all brokers at localhost:9093-9096 from inside Docker.
+    # Requires K3S NodePort range extended to 9000+ (k3d-cluster-config.yaml).
     external:
       externalAccess:
         type: nodePort
         nodePort:
           host: localhost
-          # nodePortOffset: the first broker's NodePort is 30093,
-          # subsequent brokers increment by 1
-          nodePortOffset: 30093
+          nodePortOffset: 9093
       tls:
         enabled: true
       authentication:

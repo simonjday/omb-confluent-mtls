@@ -7,7 +7,7 @@
 # Parameters:
 #   1 topic × 6 partitions
 #   1 producer @ 500 msg/s, 1 consumer
-#   512 B message size
+#   1 KB message size
 #   2 min warm-up + 5 min test
 
 name: low-latency-benchmark
@@ -17,8 +17,8 @@ topics: 1
 partitionsPerTopic: 6
 
 # Message size
-messageSize: 512
-payloadFile: "payload/payload-512b.data"
+messageSize: 1024
+payloadFile: "payload/payload-1Kb.data"
 
 # Subscription / consumer configuration
 subscriptionsPerTopic: 1

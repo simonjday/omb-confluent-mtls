@@ -187,6 +187,8 @@ create_jks_keystore() {
 
   info "Creating JKS keystore for ${name}..."
 
+  rm -f "${out_dir}/${name}.p12" "${out_dir}/${name}.keystore.jks"
+
   # PKCS12 intermediate
   openssl pkcs12 -export \
     -in "${cert}" \
@@ -220,6 +222,8 @@ create_jks_truststore() {
   local out_dir="$3"
 
   info "Creating JKS truststore for ${name}..."
+
+  rm -f "${out_dir}/${name}.truststore.jks"
 
   keytool -import \
     -alias "ca" \

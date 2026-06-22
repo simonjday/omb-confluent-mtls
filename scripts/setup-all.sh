@@ -7,9 +7,10 @@
 #   3. Generate mTLS certificates
 #   4. Create Kubernetes secrets
 #   5. Apply namespace and Confluent Platform manifests (KRaft)
-#   6. Wait for KraftController and Kafka pods to be ready
-#   7. Build OMB Docker images
-#   8. Print summary
+#   6. Restart pods simultaneously if certs were regenerated (avoids CA mismatch)
+#   7. Wait for KraftController and Kafka pods to be ready
+#   8. Build OMB Docker images
+#   9. Print summary
 #
 # Usage:
 #   ./scripts/setup-all.sh [--skip-cluster] [--skip-certs] [--skip-images]
@@ -76,7 +77,12 @@ MISSING=()
 
 for cmd in "${REQUIRED_TOOLS[@]}"; do
   if command -v "${cmd}" &>/dev/null; then
-    info "  [OK] ${cmd} — $(${cmd} --version 2>&1 | head -1 || true)"
+    case "${cmd}" in
+      kubectl) ver="$(kubectl version --client 2>/dev/null | head -1 || true)" ;;
+      helm)    ver="$(helm version --short 2>/dev/null || true)" ;;
+      *)       ver="$(${cmd} --version 2>&1 | head -1 || true)" ;;
+    esac
+    info "  [OK] ${cmd} — ${ver}"
   else
     MISSING+=("${cmd}")
     info "  [MISSING] ${cmd}"
@@ -121,16 +127,47 @@ kubectl apply -f "${REPO_ROOT}/confluent/namespace.yaml"
 kubectl apply -f "${REPO_ROOT}/confluent/confluent-platform.yaml"
 
 # ---------------------------------------------------------------------------
-# 6. Wait for KraftController and Kafka pods to be ready
+# 6. If certs were regenerated and pods already exist, restart all at once
+#    to avoid CA mismatch (rolling restart won't work across a CA change)
+# ---------------------------------------------------------------------------
+if [[ "${SKIP_CERTS}" == "false" ]]; then
+  EXISTING_PODS=$(kubectl get pods -n "${NAMESPACE}" -l "app in (kafka,kraftcontroller)" \
+    --no-headers 2>/dev/null | wc -l | tr -d ' ')
+  if [[ "${EXISTING_PODS}" -gt 0 ]]; then
+    info "Certs were regenerated — restarting all Kafka and KRaft pods simultaneously..."
+    kubectl delete pods -n "${NAMESPACE}" -l "app in (kafka,kraftcontroller)" --ignore-not-found
+    info "Pods deleted — waiting for StatefulSet controllers to recreate them..."
+    sleep 10
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 7. Wait for KraftController and Kafka pods to be ready
 # ---------------------------------------------------------------------------
 step "Waiting for KraftController pods (3/3 ready)"
-kubectl rollout status statefulset/kraftcontroller \
+info "Waiting for CFK operator to create the kraftcontroller StatefulSet..."
+for i in $(seq 1 60); do
+  kubectl get statefulset/kraftcontroller -n "${NAMESPACE}" &>/dev/null && break
+  sleep 5
+done
+info "Waiting for kraftcontroller pods to be Ready..."
+kubectl wait pod \
   -n "${NAMESPACE}" \
+  -l app=kraftcontroller \
+  --for=condition=Ready \
   --timeout=600s
 
 step "Waiting for Kafka broker pods (3/3 ready)"
-kubectl rollout status statefulset/kafka \
+info "Waiting for CFK operator to create the kafka StatefulSet..."
+for i in $(seq 1 60); do
+  kubectl get statefulset/kafka -n "${NAMESPACE}" &>/dev/null && break
+  sleep 5
+done
+info "Waiting for kafka pods to be Ready..."
+kubectl wait pod \
   -n "${NAMESPACE}" \
+  -l app=kafka \
+  --for=condition=Ready \
   --timeout=600s
 
 info "All Confluent Platform pods are ready."
@@ -160,16 +197,16 @@ cat <<EOF
   KRaft mode:   YES (no ZooKeeper)
 
   Kafka bootstrap servers (host ports):
-    localhost:9093  (kafka-0)
-    localhost:9094  (kafka-1)
-    localhost:9095  (kafka-2)
+    localhost:9093  (bootstrap)
+    localhost:9094  (kafka-0)
+    localhost:9095  (kafka-1)
+    localhost:9096  (kafka-2)
 
   Certificates:
     ${REPO_ROOT}/certs/
 
-  OMB images:
-    omb-worker:latest
-    omb-driver:latest
+  OMB image:
+    omb:latest  (worker and driver modes)
 
   Run a benchmark:
     ./scripts/run-benchmark.sh [workload-name]
