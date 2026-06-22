@@ -1,44 +1,26 @@
 # OMB Confluent mTLS
 
-A complete, production-ready Docker-based multi-worker **Open Messaging Benchmark (OMB)** platform for load-testing an **mTLS-enabled K3D-based Confluent Platform cluster** using **CFK (Confluent for Kubernetes) in pure KRaft mode**.
-
-> **No ZooKeeper.** This is a pure KRaft deployment using CFK's `KRaftController` and `Kafka` custom resources.
+A fully automated benchmark platform for load-testing an **mTLS-enabled Confluent Platform** cluster running in K3D (Docker-based Kubernetes), using **Open Messaging Benchmark (OMB)**. Pure KRaft mode — no ZooKeeper.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         K3D Cluster                                  │
-│               (k3d-confluent-benchmark Docker network)               │
-│                                                                      │
-│  ┌──────────────────────┐    ┌──────────────────────────────────┐   │
-│  │   KRaftController    │    │         Kafka Brokers            │   │
-│  │    (3 replicas)      │◄───│          (3 replicas)            │   │
-│  │                      │    │                                  │   │
-│  │  Raft quorum over    │    │  spec.dependencies.kRaftControl  │   │
-│  │  mTLS (no ZooKeeper) │    │  ler → kraftcontroller           │   │
-│  │                      │    │                                  │   │
-│  │  Port: Raft/internal │    │  Internal listener: mTLS         │   │
-│  └──────────────────────┘    │  External listener: mTLS         │   │
-│                               │  NodePorts: 30093/30094/30095   │   │
-│                               └──────────┬───────────────────────┘   │
-│                                          │ K3D LoadBalancer           │
-└──────────────────────────────────────────┼─────────────────────────── ┘
-                                           │ mTLS
-                          host ports 9093 / 9094 / 9095
-                                           │
-┌──────────────────────────────────────────┼─────────────────────────── ┐
-│  Docker Compose (OMB)  [host network]    │                             │
-│                                          │ JKS client certs            │
-│  ┌────────────┐  ┌────────────┐  ┌──────┴─────┐  ┌────────────────┐  │
-│  │ omb-worker │  │ omb-worker │  │ omb-worker │  │   omb-driver   │  │
-│  │    :8080   │  │    :8081   │  │    :8082   │  │ (orchestrates) │  │
-│  └────────────┘  └────────────┘  └────────────┘  └────────────────┘  │
-│         All containers mount certs/ with client.keystore.jks           │
-└─────────────────────────────────────────────────────────────────────── ┘
+Docker Desktop (VM)
+  K3D cluster (Docker containers acting as K8s nodes)
+    confluent namespace
+      KRaftController x3  — Raft quorum, no ZooKeeper
+      Kafka broker x3     — mTLS, NodePorts 9093-9096
+
+  Docker Compose (host network)
+    omb-worker-1  :8080
+    omb-worker-2  :8082
+    omb-worker-3  :8084
+    omb-driver    (orchestrates workers, connects to Kafka via mTLS)
 ```
+
+All OMB containers use `network_mode: host` and mount `certs/` with JKS keystores.
 
 **Key design decisions:**
 
@@ -57,8 +39,8 @@ A complete, production-ready Docker-based multi-worker **Open Messaging Benchmar
 
 | Tool | Minimum version | Install |
 |------|----------------|---------|
-| Docker | 24.x | https://docs.docker.com/get-docker/ |
-| k3d | 5.6.x | `brew install k3d` / https://k3d.io |
+| Docker Desktop | 24.x | https://docs.docker.com/get-docker/ |
+| k3d | 5.6.x | `brew install k3d` |
 | kubectl | 1.28+ | https://kubernetes.io/docs/tasks/tools/ |
 | Helm | 3.14+ | https://helm.sh/docs/intro/install/ |
 | OpenSSL | 3.x | Usually pre-installed |
@@ -68,368 +50,181 @@ A complete, production-ready Docker-based multi-worker **Open Messaging Benchmar
 
 ## Quick Start
 
-### 1. Clone and enter the repository
-
 ```bash
 git clone https://github.com/simonjday/omb-confluent-mtls.git
 cd omb-confluent-mtls
-```
-
-### 2. Run full setup (one command)
-
-```bash
 ./scripts/setup-all.sh
 ```
 
-This will:
-1. Create a K3D cluster (`confluent-benchmark`) with 1 server + 3 agents
-2. Install the CFK operator via Helm
-3. Generate mTLS certificates (CA, broker, controller, client)
-4. Create Kubernetes secrets
-5. Deploy `KRaftController` (3 replicas) and `Kafka` (3 brokers)
-6. Build the OMB Docker image
+This creates the K3D cluster, installs the CFK operator via Helm, generates all certificates, loads them into Kubernetes secrets, deploys the KRaftController and Kafka StatefulSets, and builds the OMB Docker image.
 
-Or run each step manually:
+### Run benchmarks
 
 ```bash
-# 1. K3D cluster + CFK operator
-./k3d/setup-k3d.sh
-
-# 2. Generate certificates
-./confluent/mtls/generate-certs.sh
-
-# 3. Create K8s secrets
-./confluent/mtls/create-k8s-secrets.sh
-
-# 4. Deploy Confluent Platform (KRaft)
-kubectl apply -f confluent/namespace.yaml
-kubectl apply -f confluent/confluent-platform.yaml
-
-# 5. Watch pods come up
-kubectl get pods -n confluent -w
-
-# 6. Build OMB images
-./scripts/build-omb-images.sh
+./scripts/run-benchmark.sh simple-workload   # smoke test (1k msg/s, 2 min)
+./scripts/run-benchmark.sh low-latency       # p99 latency focus (500 msg/s)
+./scripts/run-benchmark.sh high-throughput   # 100k msg/s, 4 topics
+./scripts/run-benchmark.sh endurance         # 30-min stability
 ```
 
-### 3. Run a benchmark
+### Review results
 
 ```bash
-# Smoke test (1 topic, 1000 msg/s, 2 min)
-./scripts/run-benchmark.sh simple-workload
-
-# High-throughput (4 topics, 100k msg/s, 5 min)
-./scripts/run-benchmark.sh high-throughput
-
-# Low-latency (512B messages, 500 msg/s, 5 min)
-./scripts/run-benchmark.sh low-latency
-
-# Endurance (30-minute stability test)
-./scripts/run-benchmark.sh endurance
+python3 scripts/review-results.py            # all results in results/
+python3 scripts/review-results.py results/foo.json  # specific file
 ```
 
-### 4. View results
+The script prints per-workload throughput, latency histograms, and pass/fail assessments, plus a side-by-side comparison table when multiple results are present.
+
+### Teardown
 
 ```bash
-# Latest results
-./scripts/collect-results.sh
-
-# Specific file
-./scripts/collect-results.sh results/high-throughput_20240101_120000.json
-```
-
-### 5. Teardown
-
-```bash
-./scripts/teardown.sh              # Stop containers + delete cluster
-./scripts/teardown.sh --all        # Also remove certs/ and results/
+./scripts/teardown.sh              # stop containers + delete cluster
+./scripts/teardown.sh --all        # also remove certs/ and results/
 ```
 
 ---
 
-## Running with Docker (without Compose)
+## Kafka External Access
 
-Use these commands when you want to run the unified `omb:latest` image directly — useful for quick testing, CI pipelines, or environments where docker-compose isn't available.
+The K3D loadbalancer proxies each port directly to the matching NodePort on K3D agent nodes. CFK's `nodePortOffset: 9093` aligns Kafka NodePort values with these mappings.
 
-### 1. Build the image
-
-```bash
-docker build -t omb:latest -f docker/Dockerfile docker/
-```
-
-### 2. Start workers (run each in a separate terminal)
-
-```bash
-# Worker 1 (port 8080 — default)
-docker run -d --name omb-worker-1 \
-  --network host \
-  -v "$(pwd)/certs:/certs:ro" \
-  omb:latest
-
-# Worker 2 (port 8081)
-docker run -d --name omb-worker-2 \
-  --network host \
-  -v "$(pwd)/certs:/certs:ro" \
-  omb:latest bin/benchmark-worker --port 8081
-
-# Worker 3 (port 8082)
-docker run -d --name omb-worker-3 \
-  --network host \
-  -v "$(pwd)/certs:/certs:ro" \
-  omb:latest bin/benchmark-worker --port 8082
-```
-
-### 3. Verify workers are healthy
-
-```bash
-curl -s http://localhost:8080/ping
-curl -s http://localhost:8081/ping
-curl -s http://localhost:8082/ping
-```
-
-### 4. Run a benchmark (driver mode)
-
-```bash
-# Simple workload
-docker run --rm --name omb-driver \
-  --network host \
-  -v "$(pwd)/certs:/certs:ro" \
-  -v "$(pwd)/omb:/workloads:ro" \
-  -v "$(pwd)/results:/results" \
-  --entrypoint bin/benchmark \
-  omb:latest \
-  --drivers /workloads/driver-kafka.yaml \
-  --workers-file /workloads/workers.yaml \
-  /workloads/workloads/simple-workload.yaml
-
-# High-throughput workload
-docker run --rm --name omb-driver \
-  --network host \
-  -v "$(pwd)/certs:/certs:ro" \
-  -v "$(pwd)/omb:/workloads:ro" \
-  -v "$(pwd)/results:/results" \
-  --entrypoint bin/benchmark \
-  omb:latest \
-  --drivers /workloads/driver-kafka.yaml \
-  --workers-file /workloads/workers.yaml \
-  /workloads/workloads/high-throughput.yaml
-```
-
-### 5. Stop and clean up workers
-
-```bash
-docker stop omb-worker-1 omb-worker-2 omb-worker-3
-docker rm omb-worker-1 omb-worker-2 omb-worker-3
-```
-
-### Notes
-
-- **Worker 1** uses the Dockerfile's default `CMD` (`bin/benchmark-worker --port 8080`), so no command override is needed.
-- **Workers 2 & 3** override the command to listen on different ports.
-- **The driver** uses `--entrypoint bin/benchmark` to switch from worker mode to driver mode.
-- `--rm` on the driver container cleans it up automatically after the benchmark finishes.
-- `-d` on workers runs them in the background.
-- Results are written to the mounted `results/` directory.
+| Broker | Host port | NodePort |
+|--------|-----------|----------|
+| kafka-0 | 9093 | 9093 |
+| kafka-1 | 9094 | 9094 |
+| kafka-2 | 9095 | 9095 |
+| kafka-3 | 9096 | 9096 |
 
 ---
 
-## Configuration Reference
+## Connecting a Client
 
-### Environment variables (`.env` file)
+After setup, any Kafka client can connect to `localhost:9093`. Certs are in `certs/` after running `generate-certs.sh`.
 
-Create a `.env` file in the repo root (it's gitignored):
+### kcat
 
 ```bash
-KAFKA_BOOTSTRAP_SERVERS=localhost:9093,localhost:9094,localhost:9095
+# List topics (OMB auto-generates topic names — list first to find them)
+kcat -b localhost:9093 \
+  -X security.protocol=SSL \
+  -X ssl.ca.location=certs/ca/ca.crt \
+  -X ssl.certificate.location=certs/client/client.crt \
+  -X ssl.key.location=certs/client/client.key \
+  -L 2>/dev/null | grep "topic "
+
+# Consume (replace <topic> with the name from the list above)
+kcat -b localhost:9093 \
+  -X security.protocol=SSL \
+  -X ssl.ca.location=certs/ca/ca.crt \
+  -X ssl.certificate.location=certs/client/client.crt \
+  -X ssl.key.location=certs/client/client.key \
+  -C -t <topic> -o beginning
+```
+
+### kafka-console-consumer
+
+Create `client.properties`:
+
+```properties
+security.protocol=SSL
+ssl.keystore.location=certs/client/client.keystore.jks
+ssl.keystore.password=changeit
+ssl.key.password=changeit
+ssl.truststore.location=certs/client/client.truststore.jks
+ssl.truststore.password=changeit
+```
+
+Then:
+
+```bash
+kafka-console-consumer \
+  --bootstrap-server localhost:9093 \
+  --consumer.config client.properties \
+  --topic <topic> --from-beginning
+```
+
+---
+
+## Benchmarking a Remote Cluster
+
+To target a remote cluster instead of K3D, skip `setup-all.sh` and just start the OMB workers:
+
+```bash
+docker build -t omb:latest docker/
+docker compose -f docker/docker-compose.yml up omb-worker-1 omb-worker-2 omb-worker-3 -d
+```
+
+Update `omb/driver-kafka.yaml` with your cluster's bootstrap servers and auth config, then run benchmarks as normal.
+
+---
+
+## Configuration
+
+### Environment variables (`.env` file, gitignored)
+
+```bash
+KAFKA_BOOTSTRAP_SERVERS=localhost:9093,localhost:9094,localhost:9095,localhost:9096
 KEYSTORE_PASSWORD=changeit
 TRUSTSTORE_PASSWORD=changeit
 KEY_PASSWORD=changeit
 ```
 
-### TLS certificate passwords
+### TLS certificate options
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `KEYSTORE_PASSWORD` | `changeit` | JKS keystore password |
 | `TRUSTSTORE_PASSWORD` | `changeit` | JKS truststore password |
 | `KEY_PASSWORD` | `changeit` | Private key password |
-| `CERT_VALIDITY_DAYS` | `3650` | Certificate validity (days) |
-
-### Kafka bootstrap servers
-
-The K3D cluster exposes Kafka brokers on host ports:
-
-| Broker | Host port | K8s NodePort |
-|--------|-----------|--------------|
-| kafka-0 | 9093 | 30093 |
-| kafka-1 | 9094 | 30094 |
-| kafka-2 | 9095 | 30095 |
+| `CERT_VALIDITY_DAYS` | `3650` | Certificate validity in days |
 
 ---
 
 ## Workload Customisation
 
-Workload files are in `omb/workloads/`. All fields are standard OMB workload parameters:
+Workload files are in `omb/workloads/`. All fields are standard OMB parameters:
 
 | Field | Description |
 |-------|-------------|
-| `topics` | Number of Kafka topics to create |
+| `topics` | Number of Kafka topics |
 | `partitionsPerTopic` | Partitions per topic |
-| `messageSize` | Message payload size in bytes |
+| `messageSize` | Message size in bytes |
 | `producersPerTopic` | Producers per topic |
 | `producerRate` | Target publish rate (msg/s) |
 | `consumerPerSubscription` | Consumers per subscription |
 | `warmupDurationMinutes` | Warm-up period (excluded from results) |
 | `testDurationMinutes` | Test duration |
 
-Example custom workload:
-
-```yaml
-name: my-custom-workload
-topics: 2
-partitionsPerTopic: 8
-messageSize: 4096
-producersPerTopic: 4
-producerRate: 5000
-subscriptionsPerTopic: 1
-consumerPerSubscription: 4
-consumerBacklogSizeGB: 0
-warmupDurationMinutes: 2
-testDurationMinutes: 10
-```
-
----
-
-## Worker Scaling
-
-The default configuration runs **3 OMB workers** (ports 8080–8082). To add more:
-
-1. Add a new service to `docker/docker-compose.yml`:
-
-```yaml
-omb-worker-4:
-  image: omb:latest
-  container_name: omb-worker-4
-  network_mode: host
-  volumes:
-    - ../certs:/certs:ro
-  command: ["bin/benchmark-worker", "--port", "8083"]
-```
-
-2. Add the new worker to `omb/workers.yaml`:
-
-```yaml
-workers:
-  - http://localhost:8080
-  - http://localhost:8081
-  - http://localhost:8082
-  - http://localhost:8083
-```
-
 ---
 
 ## Troubleshooting
 
-### mTLS issues
-
-**Symptom:** `SSL handshake failed` or `UNKNOWN_CA`
+### mTLS handshake failures
 
 ```bash
-# Verify the client certificate is signed by the CA
 openssl verify -CAfile certs/ca/ca.crt certs/client/client.crt
-
-# Inspect the broker certificate SANs
-openssl x509 -noout -text -in certs/broker/broker.crt | grep -A5 "Subject Alternative Name"
-
-# Test connectivity with openssl
 openssl s_client -connect localhost:9093 \
   -cert certs/client/client.crt \
   -key certs/client/client.key \
   -CAfile certs/ca/ca.crt
 ```
 
-**Solution:** Re-run `./confluent/mtls/generate-certs.sh` and `./confluent/mtls/create-k8s-secrets.sh`.
+Re-generate certs if needed: `./confluent/mtls/generate-certs.sh && ./confluent/mtls/create-k8s-secrets.sh`
 
----
-
-### KRaft issues
-
-**Symptom:** `kraftcontroller` pods stuck in `Pending` or `CrashLoopBackOff`
+### KRaft controller stuck
 
 ```bash
-# Check controller pod logs
 kubectl logs -n confluent kraftcontroller-0
-
-# Check CFK operator logs
-kubectl logs -n confluent deployment/confluent-operator
-
-# Describe the KRaftController CR
 kubectl describe kraftcontroller kraftcontroller -n confluent
 ```
 
-**Common causes:**
-- `kraftcontroller-tls` secret missing → re-run `create-k8s-secrets.sh`
-- Insufficient memory on K3D node → increase Docker Desktop memory limit
-- `local-path` storage class not available → check `kubectl get sc`
-
----
-
-### Connectivity issues
-
-**Symptom:** OMB workers can't reach Kafka
-
-```bash
-# Check K3D port mappings are working
-kubectl get svc -n confluent
-curl -v --insecure https://localhost:9093
-
-# Check K3D LoadBalancer container is running
-docker ps | grep k3d
-
-# Check Kafka external service NodePorts
-kubectl get svc kafka-external -n confluent
-```
-
-**Symptom:** OMB workers can't communicate with each other
-
-The workers use `network_mode: host`, so they must be on the same physical host.
-
----
-
 ### Certificate expiry
-
-Certificates are valid for 3650 days (10 years) by default. To regenerate:
 
 ```bash
 CERT_VALIDITY_DAYS=365 ./confluent/mtls/generate-certs.sh
 ./confluent/mtls/create-k8s-secrets.sh
-# Restart Kafka pods to pick up new certs
-kubectl rollout restart statefulset/kafka -n confluent
-kubectl rollout restart statefulset/kraftcontroller -n confluent
-```
-
----
-
-## Results Interpretation
-
-OMB results are JSON files in `results/`. Key metrics:
-
-| Metric | Field | Description |
-|--------|-------|-------------|
-| Publish throughput | `publishRate` | Messages/second published |
-| Publish latency p99 | `aggregatedPublishLatency99pct` | 99th percentile publish latency (ms) |
-| E2E latency p99 | `aggregatedEndToEndLatency99pct` | 99th percentile end-to-end latency (ms) |
-| E2E latency max | `aggregatedEndToEndLatencyMax` | Maximum end-to-end latency (ms) |
-
-Use `./scripts/collect-results.sh` for a formatted summary, or process with `jq`:
-
-```bash
-jq '{
-  throughput: .publishRate,
-  p99_publish_ms: .aggregatedPublishLatency99pct,
-  p99_e2e_ms: .aggregatedEndToEndLatency99pct,
-  max_e2e_ms: .aggregatedEndToEndLatencyMax
-}' results/*.json
+kubectl rollout restart statefulset/kafka statefulset/kraftcontroller -n confluent
 ```
 
 ---
@@ -438,54 +233,27 @@ jq '{
 
 ```
 omb-confluent-mtls/
-├── .gitignore                    # Excludes certs/, results/, .env
-├── README.md                     # This file
-│
 ├── docker/
-│   ├── Dockerfile                # Unified OMB image (worker and driver)
+│   ├── Dockerfile                # Unified OMB image (worker + driver)
 │   └── docker-compose.yml        # 3 workers + 1 driver
-│
 ├── k3d/
-│   ├── k3d-cluster-config.yaml  # K3D cluster (1 server, 3 agents)
-│   └── setup-k3d.sh             # Creates cluster + installs CFK
-│
+│   ├── k3d-cluster-config.yaml   # Cluster config (NodePort range 9000-32767)
+│   └── setup-k3d.sh              # Creates cluster + installs CFK via Helm
 ├── confluent/
-│   ├── namespace.yaml            # 'confluent' namespace
-│   ├── confluent-operator.yaml   # CFK Helm values
 │   ├── confluent-platform.yaml   # KRaftController + Kafka CRs
 │   └── mtls/
 │       ├── openssl.cnf           # OpenSSL config with SANs
-│       ├── generate-certs.sh     # Generates all certs + JKS stores
-│       └── create-k8s-secrets.sh # Creates K8s secrets from certs
-│
+│       ├── generate-certs.sh     # Generates CA, broker, controller, client certs + JKS
+│       └── create-k8s-secrets.sh # Loads certs into K8s secrets
 ├── omb/
-│   ├── driver-kafka.yaml         # Kafka driver with mTLS config
-│   ├── workers.yaml              # Worker endpoints
-│   └── workloads/
-│       ├── simple-workload.yaml  # Smoke test (1k msg/s, 2 min)
-│       ├── high-throughput.yaml  # 100k msg/s, 4 topics, 5 min
-│       ├── low-latency.yaml      # 500 msg/s, 512B, 5 min
-│       └── endurance.yaml        # 10k msg/s, 30 min
-│
+│   ├── driver-kafka.yaml         # Kafka driver config (bootstrap servers, mTLS paths)
+│   ├── workers.yaml              # Worker HTTP endpoints
+│   └── workloads/                # Workload YAML files
 ├── scripts/
-│   ├── setup-all.sh             # Full end-to-end setup
-│   ├── run-benchmark.sh         # Start workers + run workload
-│   ├── build-omb-images.sh      # Build the unified omb:latest image
-│   ├── teardown.sh              # Stop + delete everything
-│   └── collect-results.sh       # Print results summary
-│
+│   ├── setup-all.sh              # Full end-to-end setup
+│   ├── run-benchmark.sh          # Start workers + run workload
+│   ├── review-results.py         # Analyse OMB JSON output
+│   └── teardown.sh               # Stop containers + delete cluster
 ├── certs/                        # Generated certs (gitignored)
-└── results/                      # Benchmark results (gitignored)
-```
-
----
-
-## Cleanup
-
-```bash
-# Stop containers and delete K3D cluster (keep certs and results)
-./scripts/teardown.sh
-
-# Full cleanup including certs and results
-./scripts/teardown.sh --all
+└── results/                      # Benchmark JSON output (gitignored)
 ```
