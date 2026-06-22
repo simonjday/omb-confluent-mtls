@@ -1,0 +1,48 @@
+# schema-registry.yaml — Confluent Schema Registry (optional component)
+#
+# Deploys a single Schema Registry instance connected to the Kafka cluster
+# via the internal mTLS listener. Schema Registry uses its own TLS certificate
+# (signed by the same CA) to authenticate with Kafka.
+#
+# Prerequisites:
+#   - Kafka cluster running (confluent/confluent-platform.yaml applied)
+#   - schemaregistry-tls secret created (scripts/deploy-optional.sh)
+#
+# External access (after deployment):
+#   kubectl port-forward svc/schemaregistry 8081:8081 -n confluent
+#   curl -k https://localhost:8081/subjects
+
+apiVersion: platform.confluent.io/v1beta1
+kind: SchemaRegistry
+metadata:
+  name: schemaregistry
+  namespace: confluent
+spec:
+  replicas: 1
+
+  image:
+    application: confluentinc/cp-schema-registry:7.7.0
+    init: confluentinc/confluent-init-container:2.9.0
+
+  # TLS — references the schemaregistry-tls secret created by deploy-optional.sh
+  tls:
+    secretRef: schemaregistry-tls
+
+  # Connect to Kafka via the internal mTLS listener (port 9071).
+  # CFK uses Schema Registry's own TLS cert as the mTLS client credential.
+  dependencies:
+    kafka:
+      bootstrapEndpoint: kafka.confluent.svc.cluster.local:9071
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
+
+  podTemplate:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi

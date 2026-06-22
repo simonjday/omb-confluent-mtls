@@ -70,11 +70,12 @@ This creates the K3D cluster, installs the CFK operator via Helm, generates all 
 ### Review results
 
 ```bash
-python3 scripts/review-results.py            # all results in results/
-python3 scripts/review-results.py results/foo.json  # specific file
+./scripts/collect-results.sh                        # all results in results/
+./scripts/collect-results.sh results/foo.json       # specific file
+./scripts/collect-results.sh --compare              # side-by-side comparison table
 ```
 
-The script prints per-workload throughput, latency histograms, and pass/fail assessments, plus a side-by-side comparison table when multiple results are present.
+Prints per-workload throughput, latency histograms, and pass/fail assessments. Also available as `python3 scripts/review-results.py` with the same arguments.
 
 ### Teardown
 
@@ -143,6 +144,58 @@ kafka-console-consumer \
   --consumer.config client.properties \
   --topic <topic> --from-beginning
 ```
+
+---
+
+## Optional: Schema Registry and Control Center Next Gen
+
+Schema Registry and Control Center Next Gen (with embedded Prometheus and AlertManager) can be deployed on top of the running Kafka cluster. These are optional — not required for benchmarking.
+
+```bash
+./scripts/deploy-optional.sh
+```
+
+This script:
+1. Generates TLS certificates for Schema Registry, Control Center, and Prometheus/AlertManager (signed by the existing CA)
+2. Creates six Kubernetes secrets: `schemaregistry-tls`, `controlcenter-tls`, `prometheus-tls`, `alertmanager-tls`, `prometheus-client-tls`, `alertmanager-client-tls`
+3. Deploys Schema Registry and Control Center Next Gen CRs and waits for them to be ready
+4. Patches the Kafka and KRaft CRs to send KIP-714 telemetry metrics to Prometheus
+5. Starts `kubectl port-forward` processes so both UIs are reachable on localhost
+
+Once running:
+
+| Component | URL | Notes |
+|-----------|-----|-------|
+| Schema Registry | https://localhost:8081 | — |
+| Control Center Next Gen | https://localhost:9021 | — |
+
+Both use self-signed certificates — accept the browser warning on first visit.
+
+```bash
+# Test Schema Registry
+curl -k https://localhost:8081/subjects
+
+# Browse to https://localhost:9021 — broker and controller metrics appear in the UI
+
+# Stop port-forwards
+pkill -f "port-forward svc/schemaregistry"
+pkill -f "port-forward svc/controlcenter-next-gen"
+
+# Remove optional components entirely
+kubectl delete -f confluent/optional/
+kubectl delete secret schemaregistry-tls controlcenter-tls \
+  prometheus-tls alertmanager-tls \
+  prometheus-client-tls alertmanager-client-tls -n confluent
+```
+
+> **Memory:** Control Center Next Gen needs ~4 GB on top of the Kafka cluster. Make sure Docker Desktop has at least 16 GB allocated before deploying it.
+
+### Why metrics use TLS, not mTLS
+
+Kafka brokers and KRaft controllers send KIP-714 telemetry to Control Center's embedded Prometheus over HTTPS. The telemetry is handled by a Confluent-shaded asynchttpclient inside `cp-server`. In version 7.7.0 (used here), this shaded client creates its own SSLContext for the OTLP POST and **does not honour** the `ssl.truststore.*` Kafka properties for server-certificate verification — it uses the JVM default trust store instead. This means:
+
+- Prometheus is configured for **TLS only** (no client-certificate requirement). The `KAFKA_OPTS` environment variable injects our CA into the JVM trust chain so the shaded client can verify Prometheus's server cert.
+- Full **mTLS** (mutual certificate verification between broker and Prometheus) works in `cp-server` 7.9+. Upgrading the `cp-server` image version in `confluent/confluent-platform.yaml` and changing `metricsClient.authentication.type: mtls` in the patch inside `scripts/deploy-optional.sh` would enable it.
 
 ---
 
@@ -241,6 +294,9 @@ omb-confluent-mtls/
 │   └── setup-k3d.sh              # Creates cluster + installs CFK via Helm
 ├── confluent/
 │   ├── confluent-platform.yaml   # KRaftController + Kafka CRs
+│   ├── optional/
+│   │   ├── schema-registry.yaml  # Schema Registry CR (optional)
+│   │   └── control-center.yaml   # Control Center CR (optional)
 │   └── mtls/
 │       ├── openssl.cnf           # OpenSSL config with SANs
 │       ├── generate-certs.sh     # Generates CA, broker, controller, client certs + JKS
@@ -252,7 +308,9 @@ omb-confluent-mtls/
 ├── scripts/
 │   ├── setup-all.sh              # Full end-to-end setup
 │   ├── run-benchmark.sh          # Start workers + run workload
-│   ├── review-results.py         # Analyse OMB JSON output
+│   ├── collect-results.sh        # Summarise benchmark JSON output (shell wrapper)
+│   ├── review-results.py         # Analyse OMB JSON output (Python, called by above)
+│   ├── deploy-optional.sh        # Deploy Schema Registry + Control Center Next Gen
 │   └── teardown.sh               # Stop containers + delete cluster
 ├── certs/                        # Generated certs (gitignored)
 └── results/                      # Benchmark JSON output (gitignored)

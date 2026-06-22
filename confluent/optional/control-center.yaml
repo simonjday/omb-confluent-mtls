@@ -1,0 +1,74 @@
+# control-center.yaml — Confluent Control Center Next Gen (optional component)
+#
+# Deploys Control Center Next Gen with embedded Prometheus and AlertManager.
+# Kafka and KRaft are patched by deploy-optional.sh to report metrics to Prometheus.
+#
+# Prerequisites:
+#   - Kafka cluster running (confluent/confluent-platform.yaml applied)
+#   - Schema Registry running (confluent/optional/schema-registry.yaml applied)
+#   - Secrets created by scripts/deploy-optional.sh:
+#       controlcenter-tls, prometheus-tls, alertmanager-tls,
+#       prometheus-client-tls, alertmanager-client-tls
+#
+# External access (after deployment):
+#   kubectl port-forward svc/controlcenter-next-gen 9021:9021 -n confluent
+#   Open https://localhost:9021 (accept self-signed cert warning)
+
+apiVersion: platform.confluent.io/v1beta1
+kind: ControlCenter
+metadata:
+  name: controlcenter-next-gen
+  namespace: confluent
+spec:
+  replicas: 1
+
+  image:
+    application: confluentinc/cp-enterprise-control-center-next-gen:2.0.0
+    init: confluentinc/confluent-init-container:2.11.1
+
+  dataVolumeCapacity: 10Gi
+  storageClass:
+    name: local-path
+
+  tls:
+    secretRef: controlcenter-tls
+
+  # Connect to the embedded Prometheus and AlertManager services.
+  # Both are exposed via the controlcenter-next-gen service on separate ports.
+  dependencies:
+    schemaRegistry:
+      url: https://schemaregistry.confluent.svc.cluster.local:8081
+      tls:
+        enabled: true
+    prometheusClient:
+      url: https://controlcenter-next-gen.confluent.svc.cluster.local:9090
+      tls:
+        enabled: true
+        secretRef: prometheus-client-tls
+    alertManagerClient:
+      url: https://controlcenter-next-gen.confluent.svc.cluster.local:9093
+      tls:
+        enabled: true
+        secretRef: alertmanager-client-tls
+
+  # Embedded Prometheus and AlertManager run as sidecars within the CC pod
+  services:
+    prometheus:
+      image: confluentinc/cp-enterprise-prometheus:2.0.0
+      tls:
+        secretRef: prometheus-tls
+      pvc:
+        dataVolumeCapacity: 10Gi
+    alertmanager:
+      image: confluentinc/cp-enterprise-alertmanager:2.0.0
+      tls:
+        secretRef: alertmanager-tls
+
+  podTemplate:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
