@@ -17,7 +17,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CLUSTER_NAME="confluent-benchmark"
 NAMESPACE="${NAMESPACE:-confluent}"
 PORT_FORWARD=true
-POD_TIMEOUT=300
+POD_TIMEOUT=600
 
 for arg in "$@"; do
   [[ "${arg}" == "--no-port-forward" ]] && PORT_FORWARD=false
@@ -57,33 +57,39 @@ unset _node
 success "Cluster started."
 
 # ---------------------------------------------------------------------------
-# 2. Wait for Kafka and KRaft pods to be Running
+# 2. Wait for all pods to be Ready (not just Running)
 # ---------------------------------------------------------------------------
-info "Waiting for Confluent pods to be ready (timeout: ${POD_TIMEOUT}s)..."
+# Phase 1: wait for the API server to return at least one pod — it may take
+# a few seconds to become reachable after the cluster starts.
+info "Waiting for API server and pods to appear (timeout: ${POD_TIMEOUT}s)..."
 elapsed=0
 interval=10
-
 while true; do
-  # Count pods that are NOT Running or Completed (kubectl may fail while API server warms up)
-  pod_output=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null || true)
-  not_ready=$(echo "${pod_output}" | grep -v -E "Running|Completed" | grep -c "." || true)
-  total=$(echo "${pod_output}" | grep -c "." || true)
-
-  if [[ "${total}" -gt 0 && "${not_ready}" -eq 0 ]]; then
-    success "All ${total} pods are Running."
-    break
-  fi
-
+  total=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null | grep -c "." || true)
+  [[ "${total}" -gt 0 ]] && break
   if (( elapsed >= POD_TIMEOUT )); then
-    warn "Timed out waiting for pods — some may still be starting."
-    kubectl get pods -n "${NAMESPACE}" 2>/dev/null || true
+    warn "Timed out waiting for pods to appear."
     break
   fi
-
-  info "  ${not_ready}/${total} pods not yet ready... (${elapsed}s elapsed)"
+  info "  No pods visible yet... (${elapsed}s elapsed)"
   sleep "${interval}"
   elapsed=$(( elapsed + interval ))
 done
+
+# Phase 2: wait for every pod to pass its readiness probe (condition=Ready).
+# This is stricter than Running — ensures containers are actually serving
+# before we attempt port-forwards.
+info "Waiting for all pods to be Ready..."
+remaining=$(( POD_TIMEOUT - elapsed ))
+if ! kubectl wait pod --all -n "${NAMESPACE}" \
+    --for=condition=Ready \
+    --timeout="${remaining}s" 2>/dev/null; then
+  warn "Some pods did not become Ready within ${POD_TIMEOUT}s — check kubectl get pods -n ${NAMESPACE}"
+  kubectl get pods -n "${NAMESPACE}" 2>/dev/null || true
+else
+  total=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null | grep -c "." || true)
+  success "All ${total} pods are Ready."
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Show Kafka and KRaft phase
