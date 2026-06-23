@@ -58,6 +58,8 @@ cd omb-confluent-mtls
 
 This creates the K3D cluster, installs the CFK operator via Helm, generates all certificates, loads them into Kubernetes secrets, deploys the KRaftController and Kafka StatefulSets, and builds the OMB Docker image.
 
+![All 9 pods Ready in the confluent namespace](screenshots/kubectl-pods-all-ready.png)
+
 ### Run benchmarks
 
 ```bash
@@ -83,6 +85,15 @@ Prints per-workload throughput, latency histograms, and pass/fail assessments. A
 ./scripts/teardown.sh              # stop containers + delete cluster
 ./scripts/teardown.sh --all        # also remove certs/ and results/
 ```
+
+### Hibernate and resume
+
+```bash
+./scripts/suspend.sh   # stop the K3D cluster (saves Docker state, frees RAM)
+./scripts/resume.sh    # restart cluster, wait for all pods Ready, restore port-forwards
+```
+
+![resume.sh completing — all 9 pods Ready, port-forwards confirmed](screenshots/resume-sh-complete.png)
 
 ---
 
@@ -188,6 +199,8 @@ kubectl delete secret schemaregistry-tls controlcenter-tls \
   prometheus-client-tls alertmanager-client-tls -n confluent
 ```
 
+![Control Center Next Gen — cluster overview showing 3 brokers and live metrics](screenshots/control-center-overview.png)
+
 > **Memory:** Control Center Next Gen needs ~4 GB on top of the Kafka cluster. Make sure Docker Desktop has at least 16 GB allocated before deploying it.
 
 ### Why metrics use TLS, not mTLS
@@ -248,6 +261,90 @@ Workload files are in `omb/workloads/`. All fields are standard OMB parameters:
 | `consumerPerSubscription` | Consumers per subscription |
 | `warmupDurationMinutes` | Warm-up period (excluded from results) |
 | `testDurationMinutes` | Test duration |
+
+---
+
+## Confluent MCP Server (AI-Assisted Kafka Management)
+
+Once the cluster is running, you can connect the [Confluent MCP server](https://github.com/confluentinc/mcp-confluent) to interact with your Kafka cluster using natural language — via Claude Code, VS Code Copilot Chat, or Claude Desktop.
+
+### Install
+
+```bash
+mkdir -p ~/kafka-mcp-server && cd ~/kafka-mcp-server
+cat > package.json << 'EOF'
+{ "dependencies": { "@confluentinc/mcp-confluent": "latest" } }
+EOF
+npm install
+```
+
+### Configure (`config.yaml`)
+
+```yaml
+server:
+  transports: [stdio]
+  log_level: info
+
+connections:
+  k3d-mtls:
+    type: direct
+    kafka:
+      bootstrap_servers: "localhost:9093,localhost:9094,localhost:9095"
+      extra_properties:
+        security.protocol: "SSL"
+        ssl.ca.location: "/path/to/omb-confluent-mtls/certs/ca/ca.crt"
+        ssl.certificate.location: "/path/to/omb-confluent-mtls/certs/client/client.crt"
+        ssl.key.location: "/path/to/omb-confluent-mtls/certs/client/client.key"
+        ssl.endpoint.identification.algorithm: "none"
+    schema_registry:
+      endpoint: "https://localhost:8081"
+      auth:
+        type: api_key
+        key: "local"
+        secret: "local"
+```
+
+Replace `/path/to/` with the absolute path to this repo.
+
+### Register with Claude Code
+
+```bash
+claude mcp add confluent -s user \
+  -e NODE_EXTRA_CA_CERTS=/path/to/omb-confluent-mtls/certs/ca/ca.crt \
+  -- node ~/kafka-mcp-server/node_modules/@confluentinc/mcp-confluent/dist/index.js \
+  --config ~/kafka-mcp-server/config.yaml
+```
+
+Verify: `claude mcp list` should show `confluent: ✓ Connected`.
+
+### Register with VS Code Copilot Chat
+
+Add to `~/.config/Code/User/settings.json` (or `~/Library/Application Support/Code/User/settings.json` on macOS):
+
+```json
+"mcp.servers": {
+  "confluent": {
+    "type": "stdio",
+    "command": "node",
+    "args": [
+      "/Users/<you>/kafka-mcp-server/node_modules/@confluentinc/mcp-confluent/dist/index.js",
+      "--config", "/Users/<you>/kafka-mcp-server/config.yaml"
+    ],
+    "env": { "NODE_EXTRA_CA_CERTS": "/path/to/omb-confluent-mtls/certs/ca/ca.crt" }
+  }
+}
+```
+
+### Example prompts
+
+```
+List all non-internal kafka topics in my cluster
+Describe the consumer groups consuming from test-topic-*
+What is the current lag on consumer group X?
+Produce a test message to topic demo-events
+```
+
+![Claude Code calling Confluent MCP list-topics — 7 user topics returned](screenshots/claude-code-confluent-mcp-list-topics.png)
 
 ---
 
